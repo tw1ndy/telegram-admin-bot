@@ -404,6 +404,12 @@ export default {
         const webhook = await tg(env,"getWebhookInfo",{});
         const info = (webhook as unknown as {result?:{url?:string;pending_update_count?:number;last_error_message?:string;last_error_date?:number;allowed_updates?:string[]}}).result || {};
         const tables = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('settings','sessions','applications','store_orders','complaints') ORDER BY name").all<{name:string}>();
+        const tableColumns:Record<string,string[]> = {};
+        for (const table of ["settings","sessions","applications","store_orders","complaints"]) {
+          const cols = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{name:string}>();
+          tableColumns[table] = cols.results.map(col => col.name);
+        }
+        const lastWebhookError = await setting(env,"last_webhook_error");
         return Response.json({
           ok:true,
           service:"tw1ndy-admin-bot",
@@ -415,6 +421,8 @@ export default {
             allowed_updates:info.allowed_updates || []
           },
           database_tables:tables.results.map(row=>row.name),
+          database_columns:tableColumns,
+          last_webhook_error:lastWebhookError || null,
           database_schema_error:schemaError
         });
       } catch(error) {
@@ -428,13 +436,23 @@ export default {
     }
     if(request.method!=="POST"||url.pathname!=="/webhook") return new Response("Not found",{status:404});
     if(request.headers.get("X-Telegram-Bot-Api-Secret-Token")!==env.WEBHOOK_SECRET) return new Response("Unauthorized",{status:401});
+    let webhookStage = "ensure_schema";
     try {
       await ensureStoreSchema(env);
+      webhookStage = "parse_update";
       const update=await request.json() as Update;
+      webhookStage = "handle_message";
       if(update.message) await handleMessage(env,update.message);
+      webhookStage = "handle_callback";
       if(update.callback_query) await handleCallback(env,update.callback_query);
+      await setSetting(env,"last_webhook_error","");
       return new Response("ok");
-    } catch(e) { console.error("Webhook error",e); return new Response("Internal error",{status:500}); }
+    } catch(e) {
+      const detail = `${webhookStage}: ${e instanceof Error ? e.message : String(e)}`;
+      console.error("Webhook error",detail);
+      try { await setSetting(env,"last_webhook_error",detail.slice(0,1000)); } catch {}
+      return new Response("Internal error",{status:500});
+    }
   },
   async scheduled(_event:ScheduledEvent,env:Env,ctx:ExecutionContext) { ctx.waitUntil(ensureStoreSchema(env).then(() => scheduled(env))); }
 };
