@@ -403,7 +403,8 @@ export default {
     if(request.method!=="POST"||url.pathname!=="/webhook") return new Response("Not found",{status:404});
     if(request.headers.get("X-Telegram-Bot-Api-Secret-Token")!==env.WEBHOOK_SECRET) return new Response("Unauthorized",{status:401});
     try {
-      await ensureStoreSchema(env);\n      const update=await request.json() as Update;
+      await ensureStoreSchema(env);
+      const update=await request.json() as Update;
       if(update.message) await handleMessage(env,update.message);
       if(update.callback_query) await handleCallback(env,update.callback_query);
       return new Response("ok");
