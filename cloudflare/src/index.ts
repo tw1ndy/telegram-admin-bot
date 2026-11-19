@@ -301,6 +301,10 @@ async function handleCallback(env:Env,cb:Callback) {
       const activeExpiry=base?.expires_at?new Date(base.expires_at):null;
       const start=activeExpiry && activeExpiry>now?activeExpiry:now;
       const expiry=Number(row.months)>0?addMonths(start,Number(row.months)):new Date(start.getTime()+Number(row.duration_days)*86400000);
+      if(row.related_order_id) {
+        await env.DB.prepare("UPDATE store_orders SET status='renewed' WHERE id=? AND user_id=? AND status='active'")
+          .bind(Number(row.related_order_id),String(row.user_id)).run();
+      }
       await env.DB.prepare("UPDATE store_orders SET status='active',paid_at=?,starts_at=?,expires_at=?,reminder_before_sent=0,reminder_after_sent=0 WHERE id=?")
         .bind(now.toISOString(),start.toISOString(),expiry.toISOString(),id).run();
       await send(env,String(row.user_id),`✅ Оплата заказа №${row.public_id} подтверждена.\nПрефикс: ${row.prefix}\nНачало срока: ${fmt(start.toISOString())}\nОкончание: ${fmt(expiry.toISOString())}\n\nВладелец назначит префикс вручную.`);
