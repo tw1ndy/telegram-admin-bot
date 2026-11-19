@@ -1,0 +1,8 @@
+name = "tw1ndy-admin-bot"
+main = "cloudflare/src/index.ts"
+compatibility_date = "2026-11-19"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tw1ndy-admin-bot"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
