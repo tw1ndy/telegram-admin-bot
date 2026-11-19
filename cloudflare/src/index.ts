@@ -12,7 +12,7 @@ type Update = { message?:TgMessage; callback_query?:Callback };
 type Session = { step:string; data:Record<string,string> };
 
 const OWNER_FALLBACK = "tw1ndypsyh";
-const PRICES:Record<number,number> = {1:150,2:200,3:350,6:1000};
+const PRICES:Record<string,number> = {w1:150,w2:200,m1:350,m3:600};
 const mainMenu = {
   keyboard:[
     [{text:"🛒 Купить префикс"},{text:"⏳ Продлить префикс"}],
@@ -67,7 +67,7 @@ async function clearSession(env:Env,id:number) {
   await env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(String(id)).run();
 }
 function userTag(u:TgUser) { return u.username ? "@"+u.username : (u.first_name || "без имени"); }
-function priceFor(months:number) { return months>=6 ? 1000 : PRICES[months] || 0; }
+function priceFor(term:string,months:number) { return months>=6 ? 1000 : PRICES[term] || 0; }
 function addMonths(date:Date,months:number) {
   const d=new Date(date); const day=d.getUTCDate();
   d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth()+months);
@@ -102,25 +102,27 @@ async function paymentText(env:Env) {
 }
 function termKeyboard(prefix="term") {
   return {inline_keyboard:[
-    [{text:"1 неделя — 150 ₽",callback_data:prefix+":1"},{text:"2 недели — 200 ₽",callback_data:prefix+":2"}],
-    [{text:"1 месяц — 350 ₽",callback_data:prefix+":1m"},{text:"3 месяца — 600 ₽",callback_data:prefix+":3"}],
+    [{text:"1 неделя — 150 ₽",callback_data:prefix+":w1"},{text:"2 недели — 200 ₽",callback_data:prefix+":w2"}],
+    [{text:"1 месяц — 350 ₽",callback_data:prefix+":m1"},{text:"3 месяца — 600 ₽",callback_data:prefix+":m3"}],
     [{text:"От 6 месяцев — 1000 ₽",callback_data:prefix+":custom"}]
   ]};
 }
-async function createOrder(env:Env,user:TgUser,chatId:number,prefix:string,months:number,kind:"purchase"|"renewal",related:number|null) {
+async function createOrder(env:Env,user:TgUser,chatId:number,prefix:string,term:string,months:number,days:number,kind:"purchase"|"renewal",related:number|null) {
   const pay=await paymentText(env);
   if(!pay) { await send(env,chatId,"Оплата пока не настроена. Владелец ещё не добавил реквизиты."); return; }
-  const amount=priceFor(months);
+  const amount=priceFor(term,months);
+  const durationLabel=term==="w1"?"1 неделя":term==="w2"?"2 недели":months+" мес.";
+  const durationDays=days || Math.round(months*30.4375);
   const id=await uniqueOrderId(env);
-  const result=await env.DB.prepare(`INSERT INTO store_orders(public_id,user_id,username,first_name,kind,prefix,months,amount_rub,status,related_order_id)
-    VALUES(?,?,?,?,?,?,?,?,'awaiting_payment',?)`)
-    .bind(id,String(user.id),user.username||"",user.first_name||"",kind,prefix,months,amount,related).run();
+  const result=await env.DB.prepare(`INSERT INTO store_orders(public_id,user_id,username,first_name,kind,prefix,months,duration_label,duration_days,amount_rub,status,related_order_id)
+    VALUES(?,?,?,?,?,?,?,?,?,?, 'awaiting_payment',?)`)
+    .bind(id,String(user.id),user.username||"",user.first_name||"",kind,prefix,months,durationLabel,durationDays,amount,related).run();
   const orderRow=await env.DB.prepare("SELECT id FROM store_orders WHERE public_id=?").bind(id).first<{id:number}>();
   const orderDbId=orderRow?.id || Number(result.meta.last_row_id);
   const same=await env.DB.prepare("SELECT COUNT(*) AS n FROM store_orders WHERE prefix=? AND status='active' AND (expires_at IS NULL OR expires_at>?)")
     .bind(prefix,new Date().toISOString()).first<{n:number}>();
   const warning=(same?.n||0)>0 ? "\n⚠️ Такой префикс уже встречается среди активных. Вы всё равно можете продолжить оформление." : "";
-  await send(env,chatId,`Заказ №${id} создан.\nПрефикс: ${prefix}\nСрок: ${months} мес.\nСтоимость: ${amount} ₽${warning}\n\nРеквизиты для оплаты:\n${pay}\n\nПосле перевода нажмите «Я оплатил».`,{
+  await send(env,chatId,`Заказ №${id} создан.\nПрефикс: ${prefix}\nСрок: ${durationLabel}\nСтоимость: ${amount} ₽${warning}\n\nРеквизиты для оплаты:\n${pay}\n\nПосле перевода нажмите «Я оплатил».`,{
     reply_markup:{inline_keyboard:[[{text:"✅ Я оплатил",callback_data:`paid:${orderDbId}`}]]}
   });
   const owner=await ownerId(env);
@@ -154,7 +156,7 @@ async function handleMessage(env:Env,msg:TgMessage) {
   if(text==="📦 Мои заказы" || text==="🧾 История покупок") {
     const rows=await env.DB.prepare("SELECT public_id,prefix,months,amount_rub,status,created_at FROM store_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 15")
       .bind(String(id)).all<{public_id:string;prefix:string;months:number;amount_rub:number;status:string;created_at:string}>();
-    await send(env,chat,rows.results.length ? rows.results.map(r=>`№${r.public_id} · ${r.prefix} · ${r.months} мес. · ${r.amount_rub} ₽ · ${r.status} · ${fmt(r.created_at)}`).join("\n") : "Заказов пока нет.");
+    await send(env,chat,rows.results.length ? rows.results.map(r=>`№${r.public_id} · ${r.prefix} · ${r.duration_label || (r.months+" мес.")} · ${r.amount_rub} ₽ · ${r.status} · ${fmt(r.created_at)}`).join("\n") : "Заказов пока нет.");
     return;
   }
   if(text==="🏷 Мои префиксы") {
@@ -196,7 +198,7 @@ async function handleMessage(env:Env,msg:TgMessage) {
     const months=Number(text);
     if(!Number.isInteger(months)||months<6||months>120) { await send(env,chat,"Введите число месяцев от 6 до 120."); return; }
     const prefix=s.data.prefix,kind=s.data.kind||"purchase",related=s.data.related?Number(s.data.related):null;
-    await clearSession(env,id); await createOrder(env,u,chat,prefix,months,kind,related); return;
+    await clearSession(env,id); await createOrder(env,u,chat,prefix,s.data.term||"custom",months,months*30,kind,related); return;
   }
   if(s.step==="complaint_target") { s.data.target=text; await setSession(env,id,"complaint_reason",s.data); await send(env,chat,"Укажите причину жалобы:"); return; }
   if(s.step==="complaint_reason") { s.data.reason=text; await setSession(env,id,"complaint_details",s.data); await send(env,chat,"Опишите ситуацию подробнее. Если есть скриншот, отправьте его следующим сообщением; если нет — напишите «нет»."); return; }
@@ -246,10 +248,10 @@ async function handleCallback(env:Env,cb:Callback) {
     if(!s) { await tg(env,"answerCallbackQuery",{callback_query_id:cb.id,text:"Сессия устарела.",show_alert:true}); return; }
     if(v==="custom") { await setSession(env,cb.from.id,"custom_months",{...s.data,kind:isRenew?"renewal":"purchase"}); await send(env,cb.from.id,"Введите срок в месяцах (от 6 до 120)."); }
     else {
-      const months=v==="1m"?1:Number(v),kind=isRenew?"renewal":"purchase";
+      const months=v==="m1"?1:v==="m3"?3:0,days=v==="w1"?7:v==="w2"?14:0,kind=isRenew?"renewal":"purchase";
       const related=s.data.related?Number(s.data.related):null;
       await clearSession(env,cb.from.id);
-      await createOrder(env,cb.from,cb.from.id,s.data.prefix,months,kind,related);
+      await createOrder(env,cb.from,cb.from.id,s.data.prefix,v,months,days,kind,related);
     }
     await tg(env,"answerCallbackQuery",{callback_query_id:cb.id}); return;
   }
@@ -287,7 +289,7 @@ async function handleCallback(env:Env,cb:Callback) {
         .bind(Number(row.related_order_id),String(row.user_id)).first<{expires_at:string}>():null;
       const activeExpiry=base?.expires_at?new Date(base.expires_at):null;
       const start=activeExpiry && activeExpiry>now?activeExpiry:now;
-      const expiry=addMonths(start,Number(row.months));
+      const expiry=Number(row.months)>0?addMonths(start,Number(row.months)):new Date(start.getTime()+Number(row.duration_days)*86400000);
       await env.DB.prepare("UPDATE store_orders SET status='active',paid_at=?,starts_at=?,expires_at=?,reminder_before_sent=0,reminder_after_sent=0 WHERE id=?")
         .bind(now.toISOString(),start.toISOString(),expiry.toISOString(),id).run();
       await send(env,String(row.user_id),`✅ Оплата заказа №${row.public_id} подтверждена.\nПрефикс: ${row.prefix}\nНачало срока: ${fmt(start.toISOString())}\nОкончание: ${fmt(expiry.toISOString())}\n\nВладелец назначит префикс вручную.`);
