@@ -15,46 +15,49 @@ const OWNER_FALLBACK = "tw1ndypsyh";
 let storeSchemaReady: Promise<void> | null = null;
 async function ensureStoreSchema(env:Env) {
   if (!storeSchemaReady) {
-    storeSchemaReady = env.DB.exec(`
-      CREATE TABLE IF NOT EXISTS store_orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        public_id TEXT NOT NULL UNIQUE,
-        user_id TEXT NOT NULL,
-        username TEXT,
-        first_name TEXT,
-        kind TEXT NOT NULL DEFAULT 'purchase',
-        prefix TEXT NOT NULL,
-        months INTEGER NOT NULL DEFAULT 0,
-        duration_label TEXT NOT NULL DEFAULT '',
-        duration_days INTEGER NOT NULL DEFAULT 0,
-        amount_rub INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'awaiting_payment',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        paid_at TEXT,
-        starts_at TEXT,
-        expires_at TEXT,
-        reminder_before_sent INTEGER NOT NULL DEFAULT 0,
-        reminder_after_sent INTEGER NOT NULL DEFAULT 0,
-        related_order_id INTEGER,
-        rejection_reason TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_store_orders_user ON store_orders(user_id, created_at);
-      CREATE INDEX IF NOT EXISTS idx_store_orders_status ON store_orders(status);
-      CREATE INDEX IF NOT EXISTS idx_store_orders_expiry ON store_orders(status, expires_at);
-      CREATE TABLE IF NOT EXISTS complaints (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        public_id TEXT NOT NULL UNIQUE,
-        user_id TEXT NOT NULL,
-        username TEXT,
-        target_username TEXT NOT NULL,
-        reason TEXT NOT NULL,
-        details TEXT NOT NULL,
-        photo_file_id TEXT,
-        status TEXT NOT NULL DEFAULT 'new',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_complaints_created ON complaints(created_at);
-    `).then(() => undefined).catch(error => {
+    storeSchemaReady = (async () => {
+      const statements = [
+        `CREATE TABLE IF NOT EXISTS store_orders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          public_id TEXT NOT NULL UNIQUE,
+          user_id TEXT NOT NULL,
+          username TEXT,
+          first_name TEXT,
+          kind TEXT NOT NULL DEFAULT 'purchase',
+          prefix TEXT NOT NULL,
+          months INTEGER NOT NULL DEFAULT 0,
+          duration_label TEXT NOT NULL DEFAULT '',
+          duration_days INTEGER NOT NULL DEFAULT 0,
+          amount_rub INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'awaiting_payment',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          paid_at TEXT,
+          starts_at TEXT,
+          expires_at TEXT,
+          reminder_before_sent INTEGER NOT NULL DEFAULT 0,
+          reminder_after_sent INTEGER NOT NULL DEFAULT 0,
+          related_order_id INTEGER,
+          rejection_reason TEXT
+        )`,
+        "CREATE INDEX IF NOT EXISTS idx_store_orders_user ON store_orders(user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_store_orders_status ON store_orders(status)",
+        "CREATE INDEX IF NOT EXISTS idx_store_orders_expiry ON store_orders(status, expires_at)",
+        `CREATE TABLE IF NOT EXISTS complaints (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          public_id TEXT NOT NULL UNIQUE,
+          user_id TEXT NOT NULL,
+          username TEXT,
+          target_username TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          details TEXT NOT NULL,
+          photo_file_id TEXT,
+          status TEXT NOT NULL DEFAULT 'new',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        "CREATE INDEX IF NOT EXISTS idx_complaints_created ON complaints(created_at)"
+      ];
+      for (const sql of statements) await env.DB.prepare(sql).run();
+    })().catch(error => {
       storeSchemaReady = null;
       throw error;
     });
@@ -395,6 +398,8 @@ export default {
   async fetch(request:Request,env:Env):Promise<Response> {
     const url=new URL(request.url);
     if(request.method==="GET"&&url.pathname==="/health") {
+      let schemaError:string|null=null;
+      try { await ensureStoreSchema(env); } catch(error) { schemaError=String(error); }
       try {
         const webhook = await tg(env,"getWebhookInfo",{});
         const info = (webhook as unknown as {result?:{url?:string;pending_update_count?:number;last_error_message?:string;last_error_date?:number;allowed_updates?:string[]}}).result || {};
@@ -409,7 +414,8 @@ export default {
             last_error_date:info.last_error_date || null,
             allowed_updates:info.allowed_updates || []
           },
-          database_tables:tables.results.map(row=>row.name)
+          database_tables:tables.results.map(row=>row.name),
+          database_schema_error:schemaError
         });
       } catch(error) {
         return Response.json({ok:false,service:"tw1ndy-admin-bot",diagnostic_error:String(error)},{status:500});
