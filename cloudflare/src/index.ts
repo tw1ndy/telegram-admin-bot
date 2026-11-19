@@ -202,7 +202,7 @@ async function handleMessage(env:Env,msg:TgMessage) {
   if(s.step==="custom_months") {
     const months=Number(text);
     if(!Number.isInteger(months)||months<6||months>120) { await send(env,chat,"Введите число месяцев от 6 до 120."); return; }
-    const prefix=s.data.prefix,kind=s.data.kind||"purchase",related=s.data.related?Number(s.data.related):null;
+    const prefix=s.data.prefix,kind:"purchase"|"renewal"=s.data.kind==="renewal"?"renewal":"purchase",related=s.data.related?Number(s.data.related):null;
     await clearSession(env,id); await createOrder(env,u,chat,prefix,s.data.term||"custom",months,months*30,kind,related); return;
   }
   if(s.step==="complaint_target") { s.data.target=text; await setSession(env,id,"complaint_reason",s.data); await send(env,chat,"Укажите причину жалобы:"); return; }
