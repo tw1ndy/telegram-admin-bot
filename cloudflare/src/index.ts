@@ -70,7 +70,7 @@ async function handleMessage(env: Env, msg: TgMessage) {
   const username = (msg.from.username || "").toLowerCase();
 
   if (text === "/start") {
-    if (username === env.OWNER_USERNAME.replace(/^@/, "").toLowerCase()) {
+    if (username === (env.OWNER_USERNAME || "tw1ndypsyh").replace(/^@/, "").toLowerCase()) {
       await saveOwner(env, id);
       await send(env, msg.chat.id, "Вы зарегистрированы как владелец бота. Новые заявки будут приходить сюда.", { reply_markup: menu });
     } else {
