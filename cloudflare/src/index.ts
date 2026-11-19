@@ -165,8 +165,8 @@ async function handleMessage(env:Env,msg:TgMessage) {
     await send(env,chat,rows.results.length ? rows.results.map(r=>`${r.prefix} · заказ №${r.public_id} · до ${fmt(r.expires_at)}`).join("\n") : "Активных префиксов нет.");
     return;
   }
-  if(text==="📢 Размещение рекламы") { await send(env,chat,"Чтобы обсудить размещение рекламы, напишите владельцу: https://t.me/tw1ndypsyh"); return; }
-  if(text==="🤝 Сотрудничество") { await send(env,chat,"По вопросам сотрудничества напишите владельцу: https://t.me/tw1ndypsyh"); return; }
+  if(text==="📢 Размещение рекламы") { await send(env,chat,"Откройте чат с владельцем и отправьте подготовленное сообщение:",{reply_markup:{inline_keyboard:[[{text:"📢 Написать владельцу",url:"https://t.me/tw1ndypsyh?text=Здравствуйте!%20Хочу%20обсудить%20размещение%20рекламы."}]]}}); return; }
+  if(text==="🤝 Сотрудничество") { await send(env,chat,"Откройте чат с владельцем и отправьте подготовленное сообщение:",{reply_markup:{inline_keyboard:[[{text:"🤝 Написать владельцу",url:"https://t.me/tw1ndypsyh?text=Привет!%20Пишу%20насчёт%20сотрудничества."}]]}}); return; }
   if(text==="⚠️ Подать жалобу") { await setSession(env,id,"complaint_target"); await send(env,chat,"Укажите username пользователя, на которого подаёте жалобу:"); return; }
   if(text==="📝 Подать заявку на администрацию") {
     const pending=await env.DB.prepare("SELECT id FROM applications WHERE user_id=? AND status='pending' LIMIT 1").bind(String(id)).first();
