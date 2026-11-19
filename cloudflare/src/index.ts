@@ -184,6 +184,17 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true, service: "tw1ndy-admin-bot" });
     }
+    if (request.method === "POST" && url.pathname === "/setup-webhook") {
+      if (request.headers.get("Authorization") !== `Bearer ${env.WEBHOOK_SECRET}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const result = await tg(env, "setWebhook", {
+        url: "https://tw1ndy-admin-bot.tw1ndy228.workers.dev/webhook",
+        secret_token: env.WEBHOOK_SECRET,
+        allowed_updates: ["message", "callback_query"],
+      });
+      return Response.json({ ok: true, webhook: result.ok });
+    }
     if (request.method !== "POST" || url.pathname !== "/webhook") {
       return new Response("Not found", { status: 404 });
     }
