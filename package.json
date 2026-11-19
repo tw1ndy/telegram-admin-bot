@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:worker": "wrangler deploy --dry-run"
   },
   "devDependencies": {
     "wrangler": "^4.0.0",
