@@ -154,8 +154,8 @@ async function handleMessage(env:Env,msg:TgMessage) {
     return;
   }
   if(text==="📦 Мои заказы" || text==="🧾 История покупок") {
-    const rows=await env.DB.prepare("SELECT public_id,prefix,months,amount_rub,status,created_at FROM store_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 15")
-      .bind(String(id)).all<{public_id:string;prefix:string;months:number;amount_rub:number;status:string;created_at:string}>();
+    const rows=await env.DB.prepare("SELECT public_id,prefix,months,duration_label,amount_rub,status,created_at FROM store_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 15")
+      .bind(String(id)).all<{public_id:string;prefix:string;months:number;duration_label:string;amount_rub:number;status:string;created_at:string}>();
     await send(env,chat,rows.results.length ? rows.results.map(r=>`№${r.public_id} · ${r.prefix} · ${r.duration_label || (r.months+" мес.")} · ${r.amount_rub} ₽ · ${r.status} · ${fmt(r.created_at)}`).join("\n") : "Заказов пока нет.");
     return;
   }
@@ -168,6 +168,11 @@ async function handleMessage(env:Env,msg:TgMessage) {
   if(text==="📢 Размещение рекламы") { await send(env,chat,"Чтобы обсудить размещение рекламы, напишите владельцу: https://t.me/tw1ndypsyh"); return; }
   if(text==="🤝 Сотрудничество") { await send(env,chat,"По вопросам сотрудничества напишите владельцу: https://t.me/tw1ndypsyh"); return; }
   if(text==="⚠️ Подать жалобу") { await setSession(env,id,"complaint_target"); await send(env,chat,"Укажите username пользователя, на которого подаёте жалобу:"); return; }
+  if(text==="📝 Подать заявку на администрацию") {
+    const pending=await env.DB.prepare("SELECT id FROM applications WHERE user_id=? AND status='pending' LIMIT 1").bind(String(id)).first();
+    if(pending) { await send(env,chat,"У вас уже есть заявка на рассмотрении."); return; }
+    await setSession(env,id,"telegram_time",{}); await send(env,chat,"1/5. Как давно вы пользуетесь Telegram?"); return;
+  }
   if(owner && text==="📥 Заказы на проверке") {
     const rows=await env.DB.prepare("SELECT id,public_id,prefix,amount_rub,username FROM store_orders WHERE status='payment_check' ORDER BY created_at ASC LIMIT 20")
       .all<{id:number;public_id:string;prefix:string;amount_rub:number;username:string}>();
