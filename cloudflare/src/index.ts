@@ -129,7 +129,7 @@ async function createOrder(env:Env,user:TgUser,chatId:number,prefix:string,term:
   if(owner) await send(env,owner,`🛒 Новый заказ №${id}\nПокупатель: ${userTag(user)} (ID ${user.id})\nПрефикс: ${prefix}\nСрок: ${months} мес.\nСумма: ${amount} ₽\nСтатус: ожидает оплаты`);
 }
 async function orderDetails(env:Env,row:Record<string,unknown>) {
-  return `Заказ №${row.public_id}\nПокупатель: ${row.username ? "@"+row.username : row.first_name || "—"}\nTelegram ID: ${row.user_id}\nПрефикс: ${row.prefix}\nСрок: ${row.months} мес.\nСумма: ${row.amount_rub} ₽\nСоздан: ${fmt(String(row.created_at||""))}\nСтатус: ${row.status}\nОплата подтверждена: ${fmt(row.paid_at ? String(row.paid_at):null)}\nНачало: ${fmt(row.starts_at ? String(row.starts_at):null)}\nОкончание: ${fmt(row.expires_at ? String(row.expires_at):null)}`;
+  return `Заказ №${row.public_id}\nПокупатель: ${row.username ? "@"+row.username : row.first_name || "—"}\nTelegram ID: ${row.user_id}\nПрефикс: ${row.prefix}\nСрок: ${row.duration_label || (row.months+" мес.")}\nСумма: ${row.amount_rub} ₽\nСоздан: ${fmt(String(row.created_at||""))}\nСтатус: ${row.status}\nОплата подтверждена: ${fmt(row.paid_at ? String(row.paid_at):null)}\nНачало: ${fmt(row.starts_at ? String(row.starts_at):null)}\nОкончание: ${fmt(row.expires_at ? String(row.expires_at):null)}`;
 }
 async function handleMessage(env:Env,msg:TgMessage) {
   if(!msg.from) return;
@@ -209,11 +209,17 @@ async function handleMessage(env:Env,msg:TgMessage) {
   if(s.step==="complaint_reason") { s.data.reason=text; await setSession(env,id,"complaint_details",s.data); await send(env,chat,"Опишите ситуацию подробнее. Если есть скриншот, отправьте его следующим сообщением; если нет — напишите «нет»."); return; }
   if(s.step==="complaint_details") {
     const id6=await uniqueOrderId(env);
-    await env.DB.prepare("INSERT INTO complaints(public_id,user_id,username,target_username,reason,details) VALUES(?,?,?,?,?,?)")
-      .bind(id6,String(id),u.username||"",s.data.target,s.data.reason,text).run();
+    const photo=msg.photo?.[msg.photo.length-1]?.file_id || null;
+    const details=text || (photo ? "Приложен скриншот." : "");
+    await env.DB.prepare("INSERT INTO complaints(public_id,user_id,username,target_username,reason,details,photo_file_id) VALUES(?,?,?,?,?,?,?)")
+      .bind(id6,String(id),u.username||"",s.data.target,s.data.reason,details,photo).run();
     await clearSession(env,id);
     await send(env,chat,`Жалоба №${id6} отправлена владельцу.`,{reply_markup:mainMenu});
-    const o=await ownerId(env); if(o) await send(env,o,`⚠️ Новая жалоба №${id6}\nОт: ${userTag(u)}\nНа: ${s.data.target}\nПричина: ${s.data.reason}\nОписание: ${text}`);
+    const o=await ownerId(env);
+    if(o) {
+      await send(env,o,`⚠️ Новая жалоба №${id6}\nОт: ${userTag(u)}\nНа: ${s.data.target}\nПричина: ${s.data.reason}\nОписание: ${details}`);
+      if(photo) await tg(env,"sendPhoto",{chat_id:o,photo,caption:`Скриншот к жалобе №${id6}`});
+    }
     return;
   }
   if(s.step==="payment_edit" && owner) {
@@ -317,8 +323,8 @@ async function handleCallback(env:Env,cb:Callback) {
 }
 async function scheduled(env:Env) {
   const now=new Date(),soon=new Date(now.getTime()+5*60*1000);
-  const due=await env.DB.prepare("SELECT id,public_id,user_id,prefix,expires_at FROM store_orders WHERE status='active' AND expires_at<=? AND reminder_before_sent=0")
-    .bind(soon.toISOString()).all<{id:number;public_id:string;user_id:string;prefix:string;expires_at:string}>();
+  const due=await env.DB.prepare("SELECT id,public_id,user_id,prefix,expires_at FROM store_orders WHERE status='active' AND expires_at>? AND expires_at<=? AND reminder_before_sent=0")
+    .bind(now.toISOString(),soon.toISOString()).all<{id:number;public_id:string;user_id:string;prefix:string;expires_at:string}>();
   const owner=await ownerId(env);
   for(const r of due.results) {
     await send(env,r.user_id,`⏳ До окончания префикса ${r.prefix} (заказ №${r.public_id}) осталось около 5 минут.`);
