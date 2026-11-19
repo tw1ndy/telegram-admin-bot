@@ -394,7 +394,27 @@ async function scheduled(env:Env) {
 export default {
   async fetch(request:Request,env:Env):Promise<Response> {
     const url=new URL(request.url);
-    if(request.method==="GET"&&url.pathname==="/health") return Response.json({ok:true,service:"tw1ndy-admin-bot"});
+    if(request.method==="GET"&&url.pathname==="/health") {
+      try {
+        const webhook = await tg(env,"getWebhookInfo",{});
+        const info = (webhook as unknown as {result?:{url?:string;pending_update_count?:number;last_error_message?:string;last_error_date?:number;allowed_updates?:string[]}}).result || {};
+        const tables = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('settings','sessions','applications','store_orders','complaints') ORDER BY name").all<{name:string}>();
+        return Response.json({
+          ok:true,
+          service:"tw1ndy-admin-bot",
+          webhook:{
+            url:info.url || "",
+            pending_update_count:info.pending_update_count ?? 0,
+            last_error_message:info.last_error_message || null,
+            last_error_date:info.last_error_date || null,
+            allowed_updates:info.allowed_updates || []
+          },
+          database_tables:tables.results.map(row=>row.name)
+        });
+      } catch(error) {
+        return Response.json({ok:false,service:"tw1ndy-admin-bot",diagnostic_error:String(error)},{status:500});
+      }
+    }
     if(request.method==="POST"&&url.pathname==="/setup-webhook") {
       if(request.headers.get("Authorization")!==`Bearer ${env.WEBHOOK_SECRET}`) return new Response("Unauthorized",{status:401});
       const r=await tg(env,"setWebhook",{url:"https://tw1ndy-admin-bot.tw1ndy228.workers.dev/webhook",secret_token:env.WEBHOOK_SECRET,allowed_updates:["message","callback_query"]});
