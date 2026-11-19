@@ -6,3 +6,6 @@ compatibility_date = "2026-11-19"
 binding = "DB"
 database_name = "tw1ndy-admin-bot"
 database_id = "c8e26b90-faaa-471f-8388-824f85ca43d7"
+
+[triggers]
+crons = ["* * * * *"]
