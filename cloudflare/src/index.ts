@@ -13,6 +13,15 @@ type Session = { step:string; data:Record<string,string> };
 
 const OWNER_FALLBACK = "tw1ndypsyh";
 let storeSchemaReady: Promise<void> | null = null;
+const DB_CACHE_TTL_MS = 15_000;
+const dbValueCache = new Map<string, { expiresAt: number; value: string }>();
+function cachedDbValue(key: string): string | null {
+  const item = dbValueCache.get(key);
+  return item && item.expiresAt > Date.now() ? item.value : null;
+}
+function cacheDbValue(key: string, value: string) {
+  dbValueCache.set(key, { value, expiresAt: Date.now() + DB_CACHE_TTL_MS });
+}
 async function ensureStoreSchema(env:Env) {
   if (!storeSchemaReady) {
     storeSchemaReady = (async () => {
@@ -92,19 +101,31 @@ async function send(env:Env,chat_id:number|string,text:string,extra:Record<strin
   return tg(env,"sendMessage",{chat_id,text,...extra});
 }
 async function ownerId(env:Env) {
+  const cached = cachedDbValue("settings:owner_id");
+  if (cached !== null) return cached || null;
   const r=await env.DB.prepare("SELECT value FROM settings WHERE key='owner_id'").first<{value:string}>();
-  return r?.value || null;
+  const value = r?.value || "";
+  cacheDbValue("settings:owner_id", value);
+  return value || null;
 }
 async function isOwner(env:Env,id:number) { const o=await ownerId(env); return !!o && o===String(id); }
 async function saveOwner(env:Env,id:number) {
-  await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('owner_id',?)").bind(String(id)).run();
+  const value=String(id);
+  await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('owner_id',?)").bind(value).run();
+  cacheDbValue("settings:owner_id",value);
 }
 async function setting(env:Env,key:string) {
+  const cacheKey = "settings:" + key;
+  const cached = cachedDbValue(cacheKey);
+  if (cached !== null) return cached;
   const r=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first<{value:string}>();
-  return r?.value || "";
+  const value = r?.value || "";
+  cacheDbValue(cacheKey,value);
+  return value;
 }
 async function setSetting(env:Env,key:string,value:string) {
   await env.DB.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").bind(key,value).run();
+  cacheDbValue("settings:" + key,value);
 }
 async function setSession(env:Env,id:number,step:string,data:Record<string,string>={}) {
   await env.DB.prepare("INSERT OR REPLACE INTO sessions(user_id,step,data) VALUES(?,?,?)")
@@ -381,7 +402,7 @@ async function handleCallback(env:Env,cb:Callback) {
 }
 async function scheduled(env:Env) {
   const now=new Date(),soon=new Date(now.getTime()+5*60*1000);
-  const due=await env.DB.prepare("SELECT id,public_id,user_id,prefix,expires_at FROM store_orders WHERE status='active' AND expires_at>? AND expires_at<=? AND reminder_before_sent=0")
+  const due=await env.DB.prepare("SELECT id,public_id,user_id,prefix,expires_at FROM store_orders WHERE status='active' AND expires_at>? AND expires_at<=? AND reminder_before_sent=0 LIMIT 50")
     .bind(now.toISOString(),soon.toISOString()).all<{id:number;public_id:string;user_id:string;prefix:string;expires_at:string}>();
   const owner=await ownerId(env);
   for(const r of due.results) {
@@ -389,7 +410,7 @@ async function scheduled(env:Env) {
     if(owner) await send(env,owner,`⏳ Через 5 минут истекает префикс ${r.prefix}, заказ №${r.public_id}. Уведомление покупателю отправлено.`);
     await env.DB.prepare("UPDATE store_orders SET reminder_before_sent=1 WHERE id=?").bind(r.id).run();
   }
-  const expired=await env.DB.prepare("SELECT id,public_id,user_id,prefix FROM store_orders WHERE status='active' AND expires_at<=? AND reminder_after_sent=0")
+  const expired=await env.DB.prepare("SELECT id,public_id,user_id,prefix FROM store_orders WHERE status='active' AND expires_at<=? AND reminder_after_sent=0 LIMIT 50")
     .bind(new Date(now.getTime()-5*60*1000).toISOString()).all<{id:number;public_id:string;user_id:string;prefix:string}>();
   for(const r of expired.results) {
     if(owner) await send(env,owner,`⚠️ Срок префикса ${r.prefix} истёк более 5 минут назад (заказ №${r.public_id}). Удалите префикс вручную.`);
