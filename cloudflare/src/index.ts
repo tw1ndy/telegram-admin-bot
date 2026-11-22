@@ -149,8 +149,10 @@ async function uniqueOrderId(env:Env):Promise<string> {
   throw new Error("Не удалось создать номер заявки");
 }
 async function paymentText(env:Env) {
-  const parts=[await setting(env,"payment_text"),await setting(env,"payment_phone"),await setting(env,"payment_card")].filter(Boolean);
-  return parts.join("\n");
+  const rows=await env.DB.prepare("SELECT key,value FROM settings WHERE key IN ('payment_text','payment_phone','payment_card')")
+    .all<{key:string;value:string}>();
+  const values=new Map((rows.results||[]).map(row=>[row.key,row.value]));
+  return ["payment_text","payment_phone","payment_card"].map(key=>values.get(key)||"").filter(Boolean).join("\n");
 }
 function termKeyboard(prefix="term") {
   return {inline_keyboard:[
@@ -169,11 +171,11 @@ async function createOrder(env:Env,user:TgUser,chatId:number,prefix:string,term:
   const result=await env.DB.prepare(`INSERT INTO store_orders(public_id,user_id,username,first_name,kind,prefix,months,duration_label,duration_days,amount_rub,status,related_order_id)
     VALUES(?,?,?,?,?,?,?,?,?,?, 'awaiting_payment',?)`)
     .bind(id,String(user.id),user.username||"",user.first_name||"",kind,prefix,months,durationLabel,durationDays,amount,related).run();
-  const orderRow=await env.DB.prepare("SELECT id FROM store_orders WHERE public_id=?").bind(id).first<{id:number}>();
-  const orderDbId=orderRow?.id || Number(result.meta.last_row_id);
-  const same=await env.DB.prepare("SELECT COUNT(*) AS n FROM store_orders WHERE prefix=? AND status='active' AND (expires_at IS NULL OR expires_at>?)")
-    .bind(prefix,new Date().toISOString()).first<{n:number}>();
-  const warning=(same?.n||0)>0 ? "\n⚠️ Такой префикс уже встречается среди активных. Вы всё равно можете продолжить оформление." : "";
+  // D1 returns the inserted row id; avoid a second SELECT by public_id.
+  const orderDbId=Number(result.meta.last_row_id);
+  const same=await env.DB.prepare("SELECT 1 AS found FROM store_orders WHERE prefix=? AND status='active' AND (expires_at IS NULL OR expires_at>?) LIMIT 1")
+    .bind(prefix,new Date().toISOString()).first<{found:number}>();
+  const warning=same ? "\n⚠️ Такой префикс уже встречается среди активных. Вы всё равно можете продолжить оформление." : "";
   await send(env,chatId,`Заказ №${id} создан.\nПрефикс: ${prefix}\nСрок: ${durationLabel}\nСтоимость: ${amount} ₽${warning}\n\nРеквизиты для оплаты:\n${pay}\n\nПосле перевода нажмите «Я оплатил».`,{
     reply_markup:{inline_keyboard:[[{text:"✅ Я оплатил",callback_data:`paid:${orderDbId}`}]]}
   });
