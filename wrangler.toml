@@ -8,4 +8,5 @@ database_name = "tw1ndy-admin-bot"
 database_id = "c8e26b90-faaa-471f-8388-824f85ca43d7"
 
 [triggers]
-crons = ["* * * * *"]
+# Expiry reminders tolerate a 5-minute polling interval; this cuts scheduled D1 checks by 80%.
+crons = ["*/5 * * * *"]
